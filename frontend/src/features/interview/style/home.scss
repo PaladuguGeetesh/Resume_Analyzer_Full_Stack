@@ -1,3 +1,5 @@
+@use "sass:color";
+
 // ── Variables ────────────────────────────────────────────────────────────────
 $bg-page:        #0d1117;
 $bg-card:        #161b22;
@@ -12,6 +14,7 @@ $badge-required: #ff2d78;
 $badge-best:     #ff2d78;
 $info-bg:        #1b2a4a;
 $info-border:    #2d4a7a;
+$success:        #3fb950;
 $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
 // ── Page Shell ───────────────────────────────────────────────────────────────
@@ -145,20 +148,24 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
         }
     }
 
-    &--left {
-        position: relative;
-
-        .char-counter {
-            position: absolute;
-            bottom: 2.25rem;
-            right: 2rem;
-            font-size: 0.75rem;
-            color: $text-muted;
-        }
-    }
-
     &--right {
         gap: 0.75rem;
+    }
+}
+
+// Scopes the char-counter's absolute positioning to just the textarea, independent of
+// whatever else (OR divider, PDF dropzone) sits below it in the panel.
+.textarea-wrapper {
+    position: relative;
+    flex: 1;
+    display: flex;
+
+    .char-counter {
+        position: absolute;
+        bottom: 0.75rem;
+        right: 1rem;
+        font-size: 0.75rem;
+        color: $text-muted;
     }
 }
 
@@ -237,6 +244,62 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
         color: $text-muted;
         margin: 0;
     }
+
+    &__filename {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    &__remove {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        margin-top: 0.35rem;
+        padding: 0.25rem 0.6rem;
+        background: transparent;
+        border: 1px solid $border-color;
+        border-radius: 999px;
+        color: $text-muted;
+        font-size: 0.7rem;
+        cursor: pointer;
+        transition: border-color 0.2s, color 0.2s;
+
+        &:hover {
+            border-color: $accent;
+            color: $accent;
+        }
+    }
+
+    &__error {
+        margin-top: 0.4rem;
+        font-size: 0.75rem;
+        color: $accent;
+    }
+
+    &--selected {
+        border-style: solid;
+        border-color: $success;
+        background-color: rgba($success, 0.06);
+
+        &:hover {
+            border-color: $success;
+            background-color: rgba($success, 0.1);
+        }
+
+        .dropzone__icon--success {
+            color: $success;
+        }
+    }
+
+    &--error {
+        border-color: $accent;
+
+        &:hover {
+            border-color: $accent;
+        }
+    }
 }
 
 // ── OR Divider ────────────────────────────────────────────────────────────────
@@ -258,6 +321,15 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
     span {
         white-space: nowrap;
     }
+}
+
+// Plain separator between two independently-required sections (e.g. Resume and Self
+// Description) — unlike .or-divider, this carries no "OR" label, since neither section is
+// optional or a substitute for the other.
+.section-divider {
+    height: 1px;
+    background-color: $border-color;
+    margin: 0.25rem 0;
 }
 
 // ── Self Description ──────────────────────────────────────────────────────────
@@ -301,7 +373,7 @@ $font-stack:     system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Robot
     align-items: center;
     gap: 0.5rem;
     padding: 0.75rem 1.5rem;
-    background: linear-gradient(135deg, $accent 0%, darken($accent, 10%) 100%);
+    background: linear-gradient(135deg, $accent 0%, color.adjust($accent, $lightness: -10%) 100%);
     color: #fff;
     font-size: 0.9rem;
     font-weight: 600;

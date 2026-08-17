@@ -120,6 +120,8 @@ MONGO_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret
 
 GEMINI_API_KEY=your_gemini_api_key
+
+REDIS_URL=redis://localhost:6379
 ```
 
 Start the backend server:

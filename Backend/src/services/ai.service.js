@@ -1,11 +1,30 @@
 const { GoogleGenAI } = require("@google/genai");
+const Groq = require("groq-sdk");
 const { z } = require("zod");
 const { zodToJsonSchema } = require("zod-to-json-schema");
 const puppeteer = require("puppeteer");
+const CircuitBreaker = require("opossum");
 
 const ai = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_GENSI_API_KEY,
+  apiKey: process.env.GOOGLE_GENAI_API_KEY,
 });
+
+// TEMP DEBUG (requirement 4): confirm GROQ_API_KEY is actually present at construction
+// time without printing the key itself — remove once the Groq fallback is confirmed working.
+console.log(
+  `[DEBUG groq-init] GROQ_API_KEY is ${process.env.GROQ_API_KEY ? `SET (${process.env.GROQ_API_KEY.length} chars)` : "UNDEFINED/EMPTY"}`,
+);
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
+
+class AIServiceUnavailableError extends Error {
+  constructor(message = "AI service is temporarily unavailable, please try again later") {
+    super(message);
+    this.name = "AIServiceUnavailableError";
+  }
+}
 
 const interviewReportSchema = z.object({
   matchScore: z
@@ -32,7 +51,7 @@ const interviewReportSchema = z.object({
     .describe(
       "the technical questions that can be asked in the interview with detailed answer and approach to answer",
     ),
-  behaviouralQuestions: z
+  behavioralQuestions: z
     .array(
       z.object({
         question: z
@@ -83,12 +102,12 @@ const interviewReportSchema = z.object({
   title: z.string().describe("the title of the interview report"),
 });
 
-async function generateInterviewReport({
-  resume,
-  selfDescription,
-  jobDescription,
-}) {
-  const prompt = `You are an expert technical interviewer, recruiter, and hiring manager.
+// Shared by both providers: Gemini gets this text AND a responseSchema constraint,
+// Groq only gets this text (its JSON mode guarantees valid JSON, not conformance to a
+// schema), which is why the structure is spelled out in full here rather than relying
+// on either provider's schema mechanism alone.
+function buildInterviewReportPrompt({ resume, selfDescription, jobDescription }) {
+  return `You are an expert technical interviewer, recruiter, and hiring manager.
 
 Your task is to analyze the candidate's Resume, Self Description, and Job Description and generate an interview preparation report.
 
@@ -107,6 +126,8 @@ IMPORTANT INSTRUCTIONS:
 Required JSON Structure:
 
 {
+"title": string,
+
 "matchScore": number,
 
 "technicalQuestions": [
@@ -117,7 +138,7 @@ Required JSON Structure:
 }
 ],
 
-"behaviouralQuestions": [
+"behavioralQuestions": [
 {
 "question": string,
 "intention": string,
@@ -151,7 +172,9 @@ Requirements:
 4. Generate a preparation plan for 7 days.
 5. Each day in preparationPlan MUST be an object.
 6. tasks MUST be an array of strings.
-7. Do NOT return:
+7. "title" is REQUIRED — a short, specific title for this report (e.g. "Senior Backend Engineer Interview Prep"), based on the job description. Never omit it.
+8. "day" MUST be a JSON number (e.g. 1, 2, 3), never a quoted string (e.g. NOT "1", "2", "3").
+9. Do NOT return:
 
 [
 "Day 1",
@@ -217,9 +240,21 @@ ${jobDescription}
 Generate the interview report now.
 
                     `;
+}
+
+async function callGeminiForInterviewReport({
+  resume,
+  selfDescription,
+  jobDescription,
+}) {
+  if (process.env.SIMULATE_AI_FAILURE === "true") {
+    throw new Error("Simulated AI failure (SIMULATE_AI_FAILURE=true)");
+  }
+
+  const prompt = buildInterviewReportPrompt({ resume, selfDescription, jobDescription });
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-pro",
+    model: "gemini-flash-latest",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -228,12 +263,156 @@ Generate the interview report now.
     },
   });
 
-  return JSON.parse(response.text);
+  return { ...JSON.parse(response.text), generatedBy: "gemini" };
+}
+
+// Backup provider, invoked only from the circuit breaker's fallback once Gemini has
+// genuinely tripped (see interviewReportBreaker.fallback below). Groq's JSON mode
+// guarantees syntactically valid JSON but — unlike Gemini's responseSchema — gives no
+// guarantee the shape matches interviewReportSchema, so the result is validated here and
+// retried once on a schema mismatch before giving up and letting the caller fall through
+// to AIServiceUnavailableError.
+async function callGroqForInterviewReport({
+  resume,
+  selfDescription,
+  jobDescription,
+}) {
+  const prompt = buildInterviewReportPrompt({ resume, selfDescription, jobDescription });
+
+  async function attempt() {
+    let completion;
+    try {
+      completion = await groq.chat.completions.create({
+        model: "openai/gpt-oss-120b",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+      });
+    } catch (apiErr) {
+      // TEMP DEBUG (requirement 1): the Groq API call itself failed (network/auth/model
+      // error) — print what actually happened before it gets swallowed further up.
+      console.error("[DEBUG groq-fallback] Groq API call threw:", apiErr.message);
+      console.error(apiErr.stack);
+      throw apiErr;
+    }
+
+    const rawContent = completion.choices[0].message.content;
+    // TEMP DEBUG (requirement 2): raw, unparsed text Groq returned, logged before any
+    // JSON.parse/Zod validation is attempted.
+    console.log("[DEBUG groq-fallback] raw Groq response text:", rawContent);
+
+    const parsed = JSON.parse(rawContent);
+
+    try {
+      return interviewReportSchema.parse(parsed);
+    } catch (zodErr) {
+      // TEMP DEBUG (requirement 3): the specific field(s) that failed validation, not
+      // just "validation failed" — zod v3 exposes this as both .issues and .errors.
+      console.error(
+        "[DEBUG groq-fallback] Zod validation failed, issues:",
+        JSON.stringify(zodErr.issues, null, 2),
+      );
+      throw zodErr;
+    }
+  }
+
+  let result;
+  try {
+    result = await attempt();
+  } catch (err) {
+    // one retry: Groq's JSON mode has no schema constraint, so a single malformed
+    // response (missing field, flattened array, etc.) is worth one more shot before
+    // treating it as a real failure
+    result = await attempt();
+  }
+
+  return { ...result, generatedBy: "groq" };
+}
+
+// Which provider sits behind the breaker (primary, gets wrapped + retried by opossum)
+// vs. which one the fallback calls (secondary, only invoked once the breaker trips) is
+// a config choice, not a hardcoded one — flip AI_PRIMARY_PROVIDER to swap them without
+// touching the breaker wiring below. Anything other than "groq" defaults to "gemini".
+const AI_PROVIDERS = {
+  gemini: callGeminiForInterviewReport,
+  groq: callGroqForInterviewReport,
+};
+
+const PRIMARY_PROVIDER_NAME = process.env.AI_PRIMARY_PROVIDER === "groq" ? "groq" : "gemini";
+const SECONDARY_PROVIDER_NAME = PRIMARY_PROVIDER_NAME === "gemini" ? "groq" : "gemini";
+
+// Every value below is overridable via env vars so tests can swap in a fast,
+// test-scale breaker (short timeout, low volumeThreshold) without touching these
+// production defaults — see tests/circuitBreaker.test.js.
+const interviewReportBreakerOptions = {
+  // ceiling for a single call — real calls run ~60s, this gives headroom before opossum calls it a timeout
+  timeout: Number(process.env.AI_BREAKER_TIMEOUT_MS) || 75000, // 75s
+
+  // require a real sample before trusting the failure %
+  volumeThreshold: Number(process.env.AI_BREAKER_VOLUME_THRESHOLD) || 3,
+
+  // % of calls in the window that must fail to trip the breaker
+  errorThresholdPercentage: Number(process.env.AI_BREAKER_ERROR_THRESHOLD_PERCENTAGE) || 50,
+
+  // OPEN duration before a HALF_OPEN test call — roughly 2 bucket-widths of cooldown
+  resetTimeout: Number(process.env.AI_BREAKER_RESET_TIMEOUT_MS) || 180000, // 3 min
+
+  // 5 buckets × 90s each = 450s total window
+  rollingCountTimeout: Number(process.env.AI_BREAKER_ROLLING_COUNT_TIMEOUT_MS) || 450000, // 7.5 min
+
+  // bucket width = rollingCountTimeout / rollingCountBuckets — deliberately ≥ timeout,
+  // so one full primary-provider call always fits inside a single bucket, never spans two
+  rollingCountBuckets: Number(process.env.AI_BREAKER_ROLLING_COUNT_BUCKETS) || 5,
+};
+
+const interviewReportBreaker = new CircuitBreaker(
+  AI_PROVIDERS[PRIMARY_PROVIDER_NAME],
+  interviewReportBreakerOptions,
+);
+
+interviewReportBreaker.fallback(async (params, err) => {
+  // opossum calls this fallback for EVERY failed call, not just when the circuit
+  // is actually open — so only route to the backup provider once the breaker has
+  // genuinely tripped; otherwise preserve the real error (e.g. still gathering
+  // failures toward volumeThreshold) so callers see what actually went wrong.
+  if (!interviewReportBreaker.opened) {
+    throw err;
+  }
+
+  // Calling the secondary provider directly (not via .fire()) is what keeps this from
+  // touching the breaker's own stats/state — opossum only tracks calls to the wrapped
+  // primary-provider function, so the secondary stepping in here doesn't count as a
+  // primary success and doesn't delay the breaker's HALF_OPEN retry against the primary.
+  try {
+    console.warn(`[circuit-breaker] ${PRIMARY_PROVIDER_NAME} circuit is open — falling back to ${SECONDARY_PROVIDER_NAME}`);
+    return await AI_PROVIDERS[SECONDARY_PROVIDER_NAME](params);
+  } catch (fallbackErr) {
+    console.error(`[circuit-breaker] ${SECONDARY_PROVIDER_NAME} fallback also failed: ${fallbackErr.message}`);
+    throw new AIServiceUnavailableError();
+  }
+});
+
+interviewReportBreaker.on("open", () => {
+  console.error("[circuit-breaker] OPEN — AI service failing, short-circuiting new calls");
+});
+
+interviewReportBreaker.on("halfOpen", () => {
+  console.log("[circuit-breaker] HALF_OPEN — attempting a test call to AI service");
+});
+
+interviewReportBreaker.on("close", () => {
+  console.log("[circuit-breaker] CLOSED — AI service recovered, resuming normal calls");
+});
+
+async function generateInterviewReport(params) {
+  return interviewReportBreaker.fire(params);
 }
 
 async function generatePdfFromHtml(htmlContent) {
 
-  const browser=await puppeteer.launch()
+  // --no-sandbox is required to run Chromium as root inside a container (the default
+  // sandbox needs kernel privileges Docker doesn't grant without extra --cap-add setup)
+  const browser=await puppeteer.launch({args:["--no-sandbox","--disable-setuid-sandbox"]})
   const page=await browser.newPage()
   await page.setContent(htmlContent,{waitUntil:"networkidle0"})
 
@@ -259,7 +438,7 @@ async function generateResumePdf({ resume, selfDescription, jobDescription }) {
       ),
   });
 
-  const propmt =
+  const prompt =
     `Generate resume for a candidate with the following details:
                         Resume: ${resume}
                         Self Description: ${selfDescription}
@@ -274,8 +453,8 @@ async function generateResumePdf({ resume, selfDescription, jobDescription }) {
                     `
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-pro",
-    contents: propmt,
+    model: "gemini-flash-lite-latest",
+    contents: prompt,
     config: {
       responseMimeType: "application/json",
       responseSchema: zodToJsonSchema(resumePdfSchema),
@@ -292,5 +471,11 @@ async function generateResumePdf({ resume, selfDescription, jobDescription }) {
 
 module.exports = {
   generateInterviewReport,
-  generateResumePdf
+  generateResumePdf,
+  AIServiceUnavailableError,
+  interviewReportBreaker,
+  PRIMARY_PROVIDER_NAME,
+  SECONDARY_PROVIDER_NAME,
 };
+
+

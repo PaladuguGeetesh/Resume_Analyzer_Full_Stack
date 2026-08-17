@@ -1,0 +1,106 @@
+// ── Palette (mirrors features/interview/style theme) ─────────────────────────
+$bg-card:      #161b22;
+$border-color: #2a3348;
+$text-primary: #e6edf3;
+$text-muted:   #7d8590;
+$accent:       #ff2d78;
+
+.jobs-indicator {
+    position: fixed;
+    top: 1rem;
+    right: 1.25rem;
+    z-index: 50;
+
+    &__button {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.9rem;
+        background: $bg-card;
+        border: 1px solid $border-color;
+        border-radius: 999px;
+        color: $text-primary;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    &__spinner {
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: 50%;
+        border: 2px solid rgba($accent, 0.3);
+        border-top-color: $accent;
+        animation: jobs-indicator-spin 0.8s linear infinite;
+    }
+
+    &__dropdown {
+        position: absolute;
+        top: calc(100% + 0.5rem);
+        right: 0;
+        min-width: 220px;
+        background: $bg-card;
+        border: 1px solid $border-color;
+        border-radius: 0.75rem;
+        list-style: none;
+        padding: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    &__item {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.5rem 0.6rem;
+        border-radius: 0.5rem;
+        font-size: 0.8rem;
+    }
+
+    &__job-id {
+        color: $text-primary;
+    }
+
+    &__elapsed {
+        color: $text-muted;
+    }
+}
+
+@keyframes jobs-indicator-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.job-toast {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.9rem 1.1rem;
+    border-radius: 0.75rem;
+    cursor: pointer;
+    max-width: 320px;
+
+    strong {
+        font-size: 0.9rem;
+    }
+
+    span {
+        font-size: 0.8rem;
+        opacity: 0.85;
+    }
+
+    &--success {
+        background: $bg-card;
+        border: 1px solid $accent;
+        color: $text-primary;
+    }
+
+    &--hidden {
+        opacity: 0;
+    }
+
+    &--visible {
+        opacity: 1;
+    }
+}

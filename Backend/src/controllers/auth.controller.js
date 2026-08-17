@@ -1,7 +1,8 @@
 const userModel=require('../models/user.model')
 const bcrypt=require('bcryptjs')
 const jwt=require('jsonwebtoken')
-const tokenBlackListModel=require('../models/blacklist.model')
+const redisClient=require('../config/redis')
+const asyncHandler=require('../utils/asyncHandler')
 /**
  * @name registerUserController
  * @description register a new user, expect username,email and password in req.body
@@ -40,7 +41,13 @@ const registerUserController=async (req,res)=>{
         {expiresIn:"1d"}
     )
 
-    res.cookie("token",token)
+    //Express response object
+    res.cookie("token",token,{
+        httpOnly:true,
+        secure:process.env.NODE_ENV==="production",
+        sameSite:"strict",
+        maxAge:24*60*60*1000
+    })
 
     res.status(201).json({
         message:"user created successfully",
@@ -78,7 +85,12 @@ const loginUserController=async (req,res)=>{
         username:user.username
     },process.env.JWT_SECRET,{expiresIn:"1d"})
 
-    res.cookie('token',token)
+    res.cookie('token',token,{
+        httpOnly:true,
+        secure:process.env.NODE_ENV==="production",
+        sameSite:"strict",
+        maxAge:24*60*60*1000
+    })
 
     res.status(200).json({
         message:"user loggedIn succesfully",
@@ -100,7 +112,12 @@ const logoutUserController=async(req,res)=>{
     const token=req.cookies.token
 
     if(token){
-        await tokenBlackListModel.create({token})
+        const {exp}=jwt.decode(token)||{}
+        const secondsRemaining=exp-Math.floor(Date.now()/1000)
+
+        if(secondsRemaining>0){
+            await redisClient.set(`blacklist:${token}`,"1","EX",secondsRemaining)
+        }
     }
 
     res.clearCookie('token')
@@ -128,4 +145,9 @@ const getMeController=async (req,res)=>{
 }
 
 
-module.exports={registerUserController,loginUserController,logoutUserController,getMeController}
+module.exports={
+    registerUserController:asyncHandler(registerUserController),
+    loginUserController:asyncHandler(loginUserController),
+    logoutUserController:asyncHandler(logoutUserController),
+    getMeController:asyncHandler(getMeController)
+}

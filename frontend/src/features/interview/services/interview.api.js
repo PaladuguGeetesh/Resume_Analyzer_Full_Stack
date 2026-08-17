@@ -1,33 +1,43 @@
-import axios from 'axios';
-/**
- * @description Axios instance for making API requests to the backend server
- * @param {string} baseURL - The base URL of the backend server
- * @param {boolean} withCredentials - Whether to include credentials (cookies) in requests
- * @returns {object} Axios instance
- */
-const api=axios.create({
-    baseURL:"http://localhost:3000",
-    withCredentials:true,
-})
+import api from '../../../lib/apiClient'
 
 /**
- * @description Function to generate an interview report by sending job description, self description, and resume file to the backend server
- * 
- * 
+ * @description Function to enqueue interview report generation by sending job description, self
+ * description, and resume file to the backend server. The backend processes this as a background
+ * job (see Backend Day 4) — this resolves immediately with { message, jobId }, not the finished report.
+ * jobDescription and selfDescription can each be supplied as typed text OR as a PDF file — the
+ * backend prefers the PDF when both are present for a given field.
+ * @param {string} idempotencyKey - required by the backend (Day 6) to dedupe retried/duplicate submissions
  */
-export const generateInterviewReport= async({jobDescription,selfDescription,resumeFile})=>{
+export const generateInterviewReport= async({jobDescription,selfDescription,resumeFile,jobDescriptionFile,selfDescriptionFile,idempotencyKey})=>{
 
     const formData=new FormData()
     formData.append("jobDescription",jobDescription)
     formData.append("selfDescription",selfDescription)
     formData.append("resume",resumeFile)
+    if(jobDescriptionFile){
+        formData.append("jobDescriptionFile",jobDescriptionFile)
+    }
+    if(selfDescriptionFile){
+        formData.append("selfDescriptionFile",selfDescriptionFile)
+    }
 
-    const response= await api.post("/api/interview",formData,{
+    const response= await api.post("/interview",formData,{
         headers:{
-            "Content-Type":"multipart/form-data"
+            "Content-Type":"multipart/form-data",
+            "Idempotency-Key":idempotencyKey
         }
     })
 
+    return response.data
+}
+
+/**
+ * @description Function to poll the status of a report-generation job
+ * @param {string} jobId - the job ID returned by generateInterviewReport
+ * @returns {Promise} - resolves to { state, result?, failedReason? }
+ */
+export const getInterviewReportStatus=async(jobId)=>{
+    const response=await api.get(`/interview/status/${jobId}`)
     return response.data
 }
 
@@ -38,7 +48,7 @@ export const generateInterviewReport= async({jobDescription,selfDescription,resu
  */
 
 export const getInterviewReportById=async (interviewId)=>{
-    const response= await api.get(`/api/interview/report/${interviewId}`)
+    const response= await api.get(`/interview/report/${interviewId}`)
     return response.data
 }
 
@@ -47,7 +57,7 @@ export const getInterviewReportById=async (interviewId)=>{
  * @returns {Promise} - A promise resolving to the list of interview reports
  */
 export const getAllInterviewReports=async()=>{
-    const response= await api.get("/api/interview/")
+    const response= await api.get("/interview/")
 
     return response.data
 }
@@ -58,7 +68,7 @@ export const getAllInterviewReports=async()=>{
  * @returns {Promise} - A promise resolving to the generated PDF blob
  */
 export const generateResumePdf=async({interviewReportId})=>{
-    const response =await api.post(`/api/interview/resume/pdf/${interviewReportId}`,null,{
+    const response =await api.post(`/interview/resume/pdf/${interviewReportId}`,null,{
         responseType:"blob"
      })
     return response.data

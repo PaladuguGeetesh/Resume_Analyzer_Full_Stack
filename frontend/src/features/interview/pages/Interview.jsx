@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import { useState } from 'react'
 import '../style/interview.scss'
 import { useInterview } from '../hooks/useInterview.js'
-import { useNavigate, useParams } from 'react-router'
+import { useParams } from 'react-router'
+import Header from '../../../components/Header.jsx'
 
 
 
@@ -59,16 +60,11 @@ const RoadMapDay = ({ day }) => (
 // ── Main Component ────────────────────────────────────────────────────────────
 const Interview = () => {
     const [ activeNav, setActiveNav ] = useState('technical')
-    const { report, getReportById, loading, getResumePdf } = useInterview()
+    // useInterview() already fetches the report whenever interviewId changes (its own
+    // internal useEffect, driven by its own useParams()) — no need to duplicate that call
+    // here. interviewId itself is still needed below for the resume-PDF download button.
+    const { report, loading, getResumePdf } = useInterview()
     const { interviewId } = useParams()
-
-    useEffect(() => {
-        if (interviewId) {
-            getReportById(interviewId)
-        }
-    }, [ interviewId ])
-
-
 
     if (loading || !report) {
         return (
@@ -82,9 +78,14 @@ const Interview = () => {
         report.matchScore >= 80 ? 'score--high' :
             report.matchScore >= 60 ? 'score--mid' : 'score--low'
 
+    const scoreSummary =
+        report.matchScore >= 80 ? 'Strong match for this role' :
+            report.matchScore >= 60 ? 'Moderate match for this role' : 'Weak match for this role'
+
 
     return (
         <div className='interview-page'>
+            <Header />
             <div className='interview-layout'>
 
                 {/* ── Left Nav ── */}
@@ -169,7 +170,7 @@ const Interview = () => {
                             <span className='match-score__value'>{report.matchScore}</span>
                             <span className='match-score__pct'>%</span>
                         </div>
-                        <p className='match-score__sub'>Strong match for this role</p>
+                        <p className='match-score__sub'>{scoreSummary}</p>
                     </div>
 
                     <div className='sidebar-divider' />

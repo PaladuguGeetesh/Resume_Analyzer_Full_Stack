@@ -1,6 +1,6 @@
 import {getAllInterviewReports,getInterviewReportById,generateInterviewReport,generateResumePdf} from '../services/interview.api'
-import { useContext, useEffect } from "react"
-import { InterviewContext } from "../interview.context"
+import { useCallback, useContext, useEffect } from "react"
+import { InterviewContext } from "../interview-context"
 import { useParams } from "react-router"
 
 export const useInterview=()=>{
@@ -14,26 +14,27 @@ export const useInterview=()=>{
 
     const {loading,setLoading,report,setReport,reports,setReports}=context
 
-    const generateReport=async({selfDescription,jobDescription,resumeFile})=>{
-        setLoading(true)
-        let response=null
-        try{
-            response=await generateInterviewReport({selfDescription,jobDescription,resumeFile})
-            setReport(response.interviewReport)
-        }catch(err){
-            console.log(err)
-        }finally{
-            setLoading(false)
-        }
-        return response.interviewReport
+    // Report generation is now a background job (Backend Day 4): this only enqueues it and
+    // returns the jobId — it deliberately does NOT touch `loading`/`report`, since there's no
+    // report to show yet. The caller is responsible for tracking the job (see useJobs/addPendingJob)
+    // and for handling/surfacing errors — errors are left to propagate, not swallowed here.
+    // idempotencyKey is supplied by the caller (not generated here) so it can identify one
+    // logical submission attempt and stay the same across retries of that same attempt —
+    // see Home.jsx for how the key's lifecycle is actually managed.
+    const generateReport=async({selfDescription,jobDescription,resumeFile,jobDescriptionFile,selfDescriptionFile,idempotencyKey})=>{
+        const response=await generateInterviewReport({selfDescription,jobDescription,resumeFile,jobDescriptionFile,selfDescriptionFile,idempotencyKey})
+        return response.jobId
     }
 
-    const getReportById=async({interviewId})=>{
+    // wrapped in useCallback (stable identity, since setLoading/setReport/setReports are
+    // useState setters and never change) so the useEffect below can safely list these as
+    // dependencies without re-running on every render
+    const getReportById=useCallback(async(interviewId)=>{
 
         setLoading(true);
         let response=null
         try{
-            response=await getInterviewReportById({interviewId})
+            response=await getInterviewReportById(interviewId)
             setReport(response.interviewReport)
         }
         catch(error){
@@ -42,14 +43,14 @@ export const useInterview=()=>{
         finally{
             setLoading(false)
         }
-        return response.interviewReport
-    }
-    
-    const getReports=async()=>{
+        return response?.interviewReport
+    },[setLoading,setReport])
+
+    const getReports=useCallback(async()=>{
         setLoading(true);
-        let response=null   
+        let response=null
         try{
-            const response=await getAllInterviewReports()
+            response=await getAllInterviewReports()
             setReports(response.interviewReports)
         }  catch(error){
             console.log(error)
@@ -57,14 +58,13 @@ export const useInterview=()=>{
             setLoading(false)
         }
 
-        return response.interviewReport
-    }
+        return response?.interviewReports
+    },[setLoading,setReports])
 
-    const getResumePdf=async({interviewReportId})=>{
+    const getResumePdf=async(interviewReportId)=>{
         setLoading(true);
-        let response=null
         try{
-            response=await generateResumePdf({interviewReportId})
+            const response=await generateResumePdf({interviewReportId})
             const url=window.URL.createObjectURL(new Blob([response],{type:"application/pdf"}))
             const link=document.createElement("a")
             link.href=url
@@ -77,8 +77,6 @@ export const useInterview=()=>{
         finally{
             setLoading(false)
         }
-
-        
     }
 
     useEffect(() => {
@@ -87,7 +85,7 @@ export const useInterview=()=>{
         } else {
             getReports()
         }
-    }, [ interviewId ])
+    }, [ interviewId, getReportById, getReports ])
     return {loading,report,reports,generateReport,getReportById,getReports,getResumePdf}
 }
 

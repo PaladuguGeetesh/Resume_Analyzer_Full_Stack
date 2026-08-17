@@ -1,23 +1,27 @@
-import React from 'react';
 import "../auth.form.scss";
 import { Link } from 'react-router';
 import { useAuth } from '../hooks/useAuth';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
-const login = () => {
+const Login = () => {
 
   const {loading,handleLogin}=useAuth()
   const navigate=useNavigate()
 
   const [email,setEmail]=useState("")
   const [password,setPassword]=useState("")
-  
+  const [error,setError]=useState("")
 
   const handlesubmit=async (e)=>{
     e.preventDefault()
-    await handleLogin({email,password})
-    navigate('/')
+    setError("")
+    try{
+      await handleLogin({email,password})
+      navigate('/')
+    }catch(err){
+      setError(err.response?.data?.message||"login failed, please try again")
+    }
   }
 
   if(loading){
@@ -34,6 +38,8 @@ const login = () => {
         <h1>login</h1>
 
         <form onSubmit={handlesubmit}>
+
+        {error && <p className='form-error'>{error}</p>}
 
         <div className='input-group'>
           <label htmlFor='email'>Email</label>
@@ -59,4 +65,4 @@ const login = () => {
   )
 }
 
-export default login
+export default Login

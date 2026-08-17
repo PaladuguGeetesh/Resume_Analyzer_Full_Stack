@@ -112,9 +112,14 @@ const interviewReportSchema=new mongoose.Schema({
         max:100
     },
     technicalQuestions:[technicalQuestionSchema],
-    behaviouralQuestion:[behaviouralQestionSchema],
+    behavioralQuestions:[behaviouralQestionSchema],
     skillGaps:[skillGapSchema],
     preparationPlan:[preparationPlanSchema],
+    generatedBy:{
+        type:String,
+        enum:["gemini","groq"],
+        default:"gemini"
+    },
     user:{
         type:mongoose.Schema.Types.ObjectId,
         ref:"users"
@@ -126,6 +131,8 @@ const interviewReportSchema=new mongoose.Schema({
 },{
     timestamps:true    
 })
+
+interviewReportSchema.index({user:1,createdAt:-1})
 
 const interviewReportModel=mongoose.model("interviewReport",interviewReportSchema)
 
