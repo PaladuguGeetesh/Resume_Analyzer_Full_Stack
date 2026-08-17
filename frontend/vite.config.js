@@ -7,10 +7,5 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.js'],
-    poolOptions: {
-      forks: {
-        execArgv: ['--no-experimental-webstorage'],
-      },
-    },
   },
 })
