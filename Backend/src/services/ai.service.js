@@ -534,7 +534,7 @@ async function generatePdfFromHtml(htmlContent) {
   // /dev/shm (64MB) — a very common cause of exactly this kind of hang in containers.
   // --disable-gpu/--single-process trim Chromium's footprint for a memory-constrained
   // free-tier instance.
-  const browser=await puppeteer.launch({args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu","--single-process"]})
+  const browser=await puppeteer.launch({args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu","--disable-software-rasterizer","--no-zygote"]})
 
   try {
     const page=await browser.newPage()
