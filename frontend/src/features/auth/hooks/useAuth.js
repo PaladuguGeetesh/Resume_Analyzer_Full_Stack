@@ -1,6 +1,7 @@
 import { useContext,useEffect } from "react";
 import { AuthContext } from "../auth-context";
 import { login, register, logout, getMe } from "../services/auth.api";
+import toast from "react-hot-toast";
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -43,8 +44,14 @@ export const useAuth = () => {
             const data=await getMe()
             setUser(data.user)
             setLoading(false)
-          }catch{
-            // no valid session — leave user null, Protected redirects to /login
+          }catch(err){
+            // a 401 here just means "not logged in" — expected, silent, Protected
+            // redirects to /login. Anything else (network error, 5xx) means we genuinely
+            // couldn't verify the session either way, which is worth telling the user
+            // instead of silently treating them as logged out.
+            if(err.response?.status!==401){
+              toast.error("Couldn't verify your session — please refresh.")
+            }
           }finally{
             setLoading(false)
           }

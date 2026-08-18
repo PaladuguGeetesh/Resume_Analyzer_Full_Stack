@@ -6,6 +6,7 @@ import { useFileUpload } from '../hooks/useFileUpload.js'
 import { useNavigate } from 'react-router'
 import toast from 'react-hot-toast'
 import Header from '../../../components/Header.jsx'
+import FullScreenLoader from '../../../components/FullScreenLoader.jsx'
 
 function formatFileSize(bytes) {
     if (bytes < 1024) return `${bytes} B`
@@ -130,7 +131,7 @@ const Home = () => {
                 idempotencyKey,
             })
             addPendingJob(jobId)
-            toast.success("Report generation started — you'll be notified when it's ready.")
+            toast.success("Your report has been queued — you'll be notified when it's ready.")
 
             // clears the "unsaved input" state driving the beforeunload warning above, and
             // resets the form for a second report in the same session
@@ -160,11 +161,7 @@ const Home = () => {
     }
 
     if (loading) {
-        return (
-            <main className='loading-screen'>
-                <h1>Loading your interview plan...</h1>
-            </main>
-        )
+        return <FullScreenLoader message="Loading your reports..." />
     }
 
     return (

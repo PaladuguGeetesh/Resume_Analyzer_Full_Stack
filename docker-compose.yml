@@ -40,10 +40,25 @@ services:
       redis:
         condition: service_healthy
 
-  worker:
+  worker-reports:
     build:
       context: ./Backend
-    command: node worker.js
+    command: node worker-reports-standalone.js
+    env_file:
+      - ./Backend/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/resume_analyzer
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-resumes:
+    build:
+      context: ./Backend
+    command: node worker-resumes-standalone.js
     env_file:
       - ./Backend/.env
     environment:

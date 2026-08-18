@@ -63,13 +63,38 @@ export const getAllInterviewReports=async()=>{
 }
 
 /**
- * @description Function to generate a PDF of the candidate's resume
- * @param {string} interviewReportId - The ID of the interview report for which to generate the resume PDF
- * @returns {Promise} - A promise resolving to the generated PDF blob
+ * @description Function to enqueue tailored resume PDF generation as a background job — this
+ * resolves immediately with { message, jobId }, not the finished PDF (mirrors generateInterviewReport).
+ * @param {string} reportId - the interview report ID to generate a tailored resume PDF from
+ * @param {string} idempotencyKey - required to dedupe retried/duplicate submissions, same pattern as report generation
  */
-export const generateResumePdf=async({interviewReportId})=>{
-    const response =await api.post(`/interview/resume/pdf/${interviewReportId}`,null,{
+export const generateResumePdfJob=async({reportId,idempotencyKey})=>{
+    const response=await api.post(`/interview/resume-pdf/${reportId}`,null,{
+        headers:{
+            "Idempotency-Key":idempotencyKey
+        }
+    })
+    return response.data
+}
+
+/**
+ * @description Function to poll the status of a resume-PDF generation job
+ * @param {string} jobId - the job ID returned by generateResumePdfJob
+ * @returns {Promise} - resolves to { state, result?, failedReason? }
+ */
+export const getResumePdfStatus=async(jobId)=>{
+    const response=await api.get(`/interview/resume-pdf/status/${jobId}`)
+    return response.data
+}
+
+/**
+ * @description Function to fetch a generated resume PDF file once its job has completed
+ * @param {string} pdfId - the pdfId returned in the completed job's result
+ * @returns {Promise<Blob>} - the PDF file as a blob, ready for an object URL / download
+ */
+export const getResumePdfFile=async(pdfId)=>{
+    const response=await api.get(`/interview/resume-pdf/${pdfId}`,{
         responseType:"blob"
-     })
+    })
     return response.data
 }

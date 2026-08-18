@@ -544,7 +544,7 @@ async function generatePdfFromHtml(htmlContent) {
     // idle, which is both unnecessary here and exactly what was hanging past 30s.
     await page.setContent(htmlContent,{waitUntil:"domcontentloaded",timeout:60000})
 
-    const pdfBuffer = await page.pdf({
+    const pdfBytes = await page.pdf({
           format: "A4", margin: {
               top: "20mm",
               bottom: "20mm",
@@ -553,7 +553,12 @@ async function generatePdfFromHtml(htmlContent) {
           }
       })
 
-    return pdfBuffer
+    // Puppeteer's page.pdf() returns a Uint8Array, not a Node Buffer — calling
+    // .toString("base64") directly on a Uint8Array silently IGNORES the encoding
+    // argument (TypedArray#toString just comma-joins the byte values), which corrupts
+    // the file with no error anywhere. Buffer.from() here is what makes .toString("base64")
+    // downstream (resumePdfWorker.js) actually base64-encode instead of silently no-op'ing.
+    return Buffer.from(pdfBytes)
   } finally {
     // guaranteed even if setContent/pdf throws — previously a timeout skipped this
     // entirely, leaking the underlying Chromium process and starving the NEXT request
