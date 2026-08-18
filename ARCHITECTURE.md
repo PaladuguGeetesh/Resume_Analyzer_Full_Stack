@@ -1,6 +1,6 @@
 # Architecture
 
-![Architecture diagram](docs/architecture-diagram.png)
+![Architecture diagram](docs/architecture-diagram.svg)
 
 ## System Overview
 
