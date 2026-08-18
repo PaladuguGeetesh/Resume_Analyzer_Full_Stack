@@ -6,7 +6,7 @@ import axios from "axios"
 export const API_VERSION = "v1"
 
 const apiClient = axios.create({
-    baseURL: `http://localhost:3000/api/${API_VERSION}`,
+    baseURL: `${import.meta.env.VITE_API_URL}/api/${API_VERSION}`,
     withCredentials: true,
 })
 
