@@ -45,7 +45,12 @@ const registerUserController=async (req,res)=>{
     res.cookie("token",token,{
         httpOnly:true,
         secure:process.env.NODE_ENV==="production",
-        sameSite:"strict",
+        // "none" is required for the deployed setup (frontend on Vercel, backend on
+        // Render — different origins, so the browser treats the cookie as cross-site);
+        // sameSite:"none" is only valid paired with secure:true, which is exactly what
+        // the line above already evaluates to in production. Locally both frontend and
+        // backend are same-site (both on localhost), so "strict" stays correct there.
+        sameSite:process.env.NODE_ENV==="production"?"none":"strict",
         maxAge:24*60*60*1000
     })
 
@@ -88,7 +93,12 @@ const loginUserController=async (req,res)=>{
     res.cookie('token',token,{
         httpOnly:true,
         secure:process.env.NODE_ENV==="production",
-        sameSite:"strict",
+        // "none" is required for the deployed setup (frontend on Vercel, backend on
+        // Render — different origins, so the browser treats the cookie as cross-site);
+        // sameSite:"none" is only valid paired with secure:true, which is exactly what
+        // the line above already evaluates to in production. Locally both frontend and
+        // backend are same-site (both on localhost), so "strict" stays correct there.
+        sameSite:process.env.NODE_ENV==="production"?"none":"strict",
         maxAge:24*60*60*1000
     })
 

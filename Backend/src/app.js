@@ -7,7 +7,9 @@ app.use(helmet())
 app.use(express.json())
 app.use(cookieParser())
 app.use(cors({
-    origin:"http://localhost:5173",
+    // falls back to the local dev URL so a fresh clone still works without needing
+    // FRONTEND_URL set — Render/production sets FRONTEND_URL to the actual Vercel origin
+    origin:process.env.FRONTEND_URL||"http://localhost:5173",
     credentials:true
 }))
 

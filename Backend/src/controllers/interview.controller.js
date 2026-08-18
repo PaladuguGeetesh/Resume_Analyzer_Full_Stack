@@ -1,5 +1,5 @@
 const pdfParse=require('pdf-parse');
-const {generateResumePdf}=require('../services/ai.service');
+const {generateResumePdf,AIServiceUnavailableError}=require('../services/ai.service');
 const interviewReportModel=require('../models/interviewReport.model')
 const asyncHandler=require('../utils/asyncHandler')
 const {interviewQueue,enqueueInterviewReportJob}=require('../queues/interview.queue')
@@ -157,7 +157,20 @@ const generateResumePdfController=async(req,res)=>{
 
     const {resume,selfDescription,jobDescription}=interviewReport
 
-    const pdfBuffer=await generateResumePdf({resume,selfDescription,jobDescription})
+    // generateResumePdf stays in the synchronous request path (no queue/worker for this
+    // one) — AIServiceUnavailableError means the shared breaker (see ai.service.js) has
+    // already tripped, so fail fast with a clean 503 instead of a raw error/stack trace.
+    let pdfBuffer
+    try{
+        pdfBuffer=await generateResumePdf({resume,selfDescription,jobDescription})
+    }catch(err){
+        if(err instanceof AIServiceUnavailableError){
+            return res.status(503).json({
+                message:"AI service temporarily unavailable, please try again shortly"
+            })
+        }
+        throw err
+    }
 
     res.set({
         'Content-Type': 'application/pdf',

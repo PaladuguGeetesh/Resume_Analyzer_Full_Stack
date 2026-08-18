@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:26-alpine
 
 # puppeteer (used for resume PDF generation) downloads a glibc-linked Chrome by
 # default, which doesn't run on alpine's musl libc — install Chromium from
