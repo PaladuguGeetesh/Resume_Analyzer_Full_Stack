@@ -136,6 +136,13 @@ Server runs at:
 http://localhost:3000
 ```
 
+Report generation and resume-PDF generation run as separate background workers (BullMQ) — start each in its own terminal:
+
+```bash
+npm run worker:reports
+npm run worker:resumes
+```
+
 ---
 
 ## Frontend Setup

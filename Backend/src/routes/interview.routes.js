@@ -1,12 +1,17 @@
 const express=require('express');
 const {authUser}=require('../middleware/auth.middleware');
-const {generateInterviewReportController,getInterviewReportByIdController, getAllInterviewReportsController,generateResumePdfController,getInterviewReportStatusController}=require('../controllers/interview.controller')
+const {generateInterviewReportController,getInterviewReportByIdController, getAllInterviewReportsController,generateResumePdfController,getInterviewReportStatusController,getResumePdfStatusController,getResumePdfFileController}=require('../controllers/interview.controller')
 const upload=require('../middleware/file.middleware')
 const validate=require('../middleware/validate.middleware')
 const idempotency=require('../middleware/idempotency.middleware')
 const {generateReportSchema}=require('../validators/interview.validator')
 
 const interviewRouter=express.Router();
+
+// distinct key space from the report-generation idempotency keys above (idempotency:...)
+// so a report submission and a resume-PDF submission from the same user never collide
+// just because a client happened to reuse the same literal Idempotency-Key value
+const resumePdfIdempotency=idempotency.withPrefix("idempotency:resume-pdf")
 
 // jobDescription and selfDescription can each arrive as typed text (validated by
 // generateReportSchema) OR as an uploaded PDF (jobDescriptionFile/selfDescriptionFile,
@@ -68,6 +73,26 @@ interviewRouter.get("/status/:jobId",authUser,getInterviewReportStatusController
  */
 interviewRouter.get("/",authUser,getAllInterviewReportsController)
 
-interviewRouter.post("/resume/pdf/:interviewReportId",authUser,generateResumePdfController)
+/**
+ * @route POST /api/v1/interview/resume-pdf/:reportId
+ * @desc enqueue tailored resume PDF generation for the given interview report as a background job
+ * @access Private
+ */
+interviewRouter.post("/resume-pdf/:reportId",authUser,resumePdfIdempotency,generateResumePdfController)
+
+/**
+ * @route GET /api/v1/interview/resume-pdf/status/:jobId
+ * @desc get the status (and result, once completed) of a resume-PDF generation job — MUST be
+ * registered before GET /resume-pdf/:id below, or Express would match "status" as the :id param
+ * @access Private
+ */
+interviewRouter.get("/resume-pdf/status/:jobId",authUser,getResumePdfStatusController)
+
+/**
+ * @route GET /api/v1/interview/resume-pdf/:id
+ * @desc fetch the generated resume PDF file once ready (404 once its 2h TTL has expired)
+ * @access Private
+ */
+interviewRouter.get("/resume-pdf/:id",authUser,getResumePdfFileController)
 
 module.exports=interviewRouter;

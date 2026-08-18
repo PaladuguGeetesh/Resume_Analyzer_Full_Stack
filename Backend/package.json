@@ -6,7 +6,8 @@
   "scripts": {
     "test": "jest --runInBand --detectOpenHandles",
     "dev": "npx nodemon server.js",
-    "worker": "npx nodemon worker-standalone.js"
+    "worker:reports": "npx nodemon worker-reports-standalone.js",
+    "worker:resumes": "npx nodemon worker-resumes-standalone.js"
   },
   "keywords": [],
   "author": "",

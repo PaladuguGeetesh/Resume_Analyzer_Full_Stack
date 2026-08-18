@@ -1,7 +1,8 @@
-import {getAllInterviewReports,getInterviewReportById,generateInterviewReport,generateResumePdf} from '../services/interview.api'
+import {getAllInterviewReports,getInterviewReportById,generateInterviewReport} from '../services/interview.api'
 import { useCallback, useContext, useEffect } from "react"
 import { InterviewContext } from "../interview-context"
 import { useParams } from "react-router"
+import toast from "react-hot-toast"
 
 export const useInterview=()=>{
 
@@ -54,30 +55,13 @@ export const useInterview=()=>{
             setReports(response.interviewReports)
         }  catch(error){
             console.log(error)
+            toast.error("Couldn't load your reports — please try again.")
         }   finally{
             setLoading(false)
         }
 
         return response?.interviewReports
     },[setLoading,setReports])
-
-    const getResumePdf=async(interviewReportId)=>{
-        setLoading(true);
-        try{
-            const response=await generateResumePdf({interviewReportId})
-            const url=window.URL.createObjectURL(new Blob([response],{type:"application/pdf"}))
-            const link=document.createElement("a")
-            link.href=url
-            link.setAttribute("download",`resume_${interviewReportId}.pdf`)
-            document.body.appendChild(link)
-            link.click()
-        }catch(error){
-            console.log(error)
-        }
-        finally{
-            setLoading(false)
-        }
-    }
 
     useEffect(() => {
         if (interviewId) {
@@ -86,6 +70,6 @@ export const useInterview=()=>{
             getReports()
         }
     }, [ interviewId, getReportById, getReports ])
-    return {loading,report,reports,generateReport,getReportById,getReports,getResumePdf}
+    return {loading,report,reports,generateReport,getReportById,getReports}
 }
 

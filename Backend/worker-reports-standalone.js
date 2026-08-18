@@ -6,4 +6,4 @@ const {startWorker}=require('./worker')
 connectToDB()
 startWorker()
 
-console.log('[worker-standalone] running as a standalone worker process')
+console.log('[worker-reports-standalone] running as a standalone worker process')

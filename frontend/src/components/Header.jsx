@@ -9,6 +9,22 @@ function elapsedLabel(submittedAt) {
     return `${minutes}m ago`
 }
 
+// This dropdown is the one place a report job and a resume-PDF job can be visible side by
+// side, so each entry needs to read as unambiguous on its own — distinct wording per
+// jobType, and per whether the worker has actually picked it up yet ("active") or it's
+// still sitting in the queue.
+function jobStatusMessage(job) {
+    const isActive = job.state === "active"
+    if (job.jobType === "resume-pdf") {
+        return isActive
+            ? "Tailoring your resume for this role — this can take a minute..."
+            : "Your resume is being generated..."
+    }
+    return isActive
+        ? "Analyzing your resume — this can take a minute..."
+        : "Your report has been queued..."
+}
+
 const Header = () => {
     const { pendingJobs } = useJobs()
     const [open, setOpen] = useState(false)
@@ -38,7 +54,7 @@ const Header = () => {
                 <ul className='jobs-indicator__dropdown'>
                     {pendingJobs.map((job) => (
                         <li key={job.jobId} className='jobs-indicator__item'>
-                            <span className='jobs-indicator__job-id'>Job {job.jobId}</span>
+                            <span className='jobs-indicator__job-id'>{jobStatusMessage(job)}</span>
                             <span className='jobs-indicator__elapsed'>{elapsedLabel(job.submittedAt)}</span>
                         </li>
                     ))}

@@ -6,7 +6,7 @@ const interviewReportModel=require('./src/models/interviewReport.model')
 const {QUEUE_NAME}=require('./src/queues/interview.queue')
 
 // Exported instead of self-executing: this file gets require()'d from two different
-// entry points (worker-standalone.js for a separate process, server.js for Render's
+// entry points (worker-reports-standalone.js for a separate process, server.js for Render's
 // free-tier combined-process mode) — self-executing here would mean require()ing this
 // file for its startWorker export ALSO connected to Redis and started a worker as a side
 // effect, with no way for the caller to control when/whether that happens. dotenv config

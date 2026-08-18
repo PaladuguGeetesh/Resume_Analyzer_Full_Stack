@@ -8,5 +8,6 @@ module.exports = {
     '^pdf-parse$': '<rootDir>/tests/mocks/pdf-parse.mock.js',
     '^puppeteer$': '<rootDir>/tests/mocks/puppeteer.mock.js',
     'queues/interview\\.queue$': '<rootDir>/tests/mocks/interview.queue.mock.js',
+    'queues/resumePdf\\.queue$': '<rootDir>/tests/mocks/resumePdf.queue.mock.js',
   },
 }

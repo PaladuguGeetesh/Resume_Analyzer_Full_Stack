@@ -1,8 +1,9 @@
 const pdfParse=require('pdf-parse');
-const {generateResumePdf,AIServiceUnavailableError}=require('../services/ai.service');
 const interviewReportModel=require('../models/interviewReport.model')
+const generatedResumePdfModel=require('../models/generatedResumePdf.model')
 const asyncHandler=require('../utils/asyncHandler')
 const {interviewQueue,enqueueInterviewReportJob}=require('../queues/interview.queue')
+const {resumePdfQueue,enqueueResumePdfJob}=require('../queues/resumePdf.queue')
 const redisClient=require('../config/redis')
 const idempotency=require('../middleware/idempotency.middleware')
 
@@ -81,7 +82,10 @@ const getInterviewReportStatusController=async(req,res)=>{
     const {jobId}=req.params
     const job=await interviewQueue.getJob(jobId)
 
-    if(!job){
+    // same IDOR discipline as the resume-PDF status/file lookups: a job that exists but
+    // belongs to someone else is reported as "not found", never distinguished from a
+    // genuinely nonexistent one — job IDs are small sequential integers, easily guessable
+    if(!job || job.data.userId!==req.user.id){
         return res.status(404).json({
             message:"job not found"
         })
@@ -139,15 +143,15 @@ const getAllInterviewReportsController=async(req,res)=>{
 }
 
 /**
- * @description Controller to generate resume PDF
- * @route GET /api/v1/interview/resume/:interviewReportId
+ * @description Controller to enqueue tailored resume PDF generation as a background job
+ * @route POST /api/v1/interview/resume-pdf/:reportId
  * @access Private
  */
 const generateResumePdfController=async(req,res)=>{
 
-    const {interviewReportId}=req.params
+    const {reportId}=req.params
 
-    const interviewReport=await interviewReportModel.findOne({_id:interviewReportId,user:req.user.id})
+    const interviewReport=await interviewReportModel.findOne({_id:reportId,user:req.user.id})
 
     if(!interviewReport){
         return res.status(404).json({
@@ -157,24 +161,92 @@ const generateResumePdfController=async(req,res)=>{
 
     const {resume,selfDescription,jobDescription}=interviewReport
 
-    // generateResumePdf stays in the synchronous request path (no queue/worker for this
-    // one) — AIServiceUnavailableError means the shared breaker (see ai.service.js) has
-    // already tripped, so fail fast with a clean 503 instead of a raw error/stack trace.
-    let pdfBuffer
+    // distinct prefix ("idempotency:resume-pdf:...") from the report-generation idempotency
+    // keys — see idempotency.middleware.js's withPrefix and interview.routes.js
+    const idempotencyRedisKey=idempotency.buildRedisKey(req.user.id,req.idempotencyKey,"idempotency:resume-pdf")
+
+    let job
     try{
-        pdfBuffer=await generateResumePdf({resume,selfDescription,jobDescription})
+        job=await enqueueResumePdfJob({
+            userId:req.user.id,
+            resume,
+            selfDescription,
+            jobDescription
+        })
     }catch(err){
-        if(err instanceof AIServiceUnavailableError){
-            return res.status(503).json({
-                message:"AI service temporarily unavailable, please try again shortly"
-            })
-        }
+        // don't leave the idempotency key stuck at "in_progress" forever — let a retry with the same key proceed
+        await redisClient.del(idempotencyRedisKey)
         throw err
     }
 
+    await redisClient.set(
+        idempotencyRedisKey,
+        JSON.stringify({status:"completed",jobId:job.id}),
+        "EX",
+        idempotency.TTL_SECONDS
+    )
+
+    res.status(202).json({
+        message:"Resume PDF generation started",
+        jobId:job.id
+    })
+}
+
+/**
+ * @description Controller to get the status (and result, once completed) of a resume-PDF generation job
+ * @route GET /api/v1/interview/resume-pdf/status/:jobId
+ * @access Private
+ */
+const getResumePdfStatusController=async(req,res)=>{
+
+    const {jobId}=req.params
+    const job=await resumePdfQueue.getJob(jobId)
+
+    // same IDOR discipline as the report/resume-file lookups below: a job that exists but
+    // belongs to someone else is reported as "not found", never distinguished from a
+    // genuinely nonexistent one
+    if(!job || job.data.userId!==req.user.id){
+        return res.status(404).json({
+            message:"job not found"
+        })
+    }
+
+    const state=await job.getState()
+
+    res.status(200).json({
+        message:"job status fetched successfully",
+        jobId:job.id,
+        state,
+        ...(state==="completed" && {result:job.returnvalue}),
+        ...(state==="failed" && {failedReason:job.failedReason})
+    })
+
+}
+
+/**
+ * @description Controller to fetch a generated resume PDF file once ready
+ * @route GET /api/v1/interview/resume-pdf/:id
+ * @access Private
+ */
+const getResumePdfFileController=async(req,res)=>{
+
+    const {id}=req.params
+
+    const generatedResumePdf=await generatedResumePdfModel.findOne({_id:id,user:req.user.id})
+
+    // covers both "never existed", "belongs to someone else", and "TTL already expired it"
+    // with the same response — same IDOR discipline as Day 1, never leak which case it was
+    if(!generatedResumePdf){
+        return res.status(404).json({
+            message:"This download has expired — please generate a new one."
+        })
+    }
+
+    const pdfBuffer=Buffer.from(generatedResumePdf.pdfData,"base64")
+
     res.set({
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="resume_${interviewReportId}.pdf"`,        
+        'Content-Disposition': 'attachment; filename="resume.pdf"',
     })
 
     res.send(pdfBuffer)
@@ -187,5 +259,7 @@ module.exports={
     getInterviewReportByIdController:asyncHandler(getInterviewReportByIdController),
     getAllInterviewReportsController:asyncHandler(getAllInterviewReportsController),
     generateResumePdfController:asyncHandler(generateResumePdfController),
-    getInterviewReportStatusController:asyncHandler(getInterviewReportStatusController)
+    getInterviewReportStatusController:asyncHandler(getInterviewReportStatusController),
+    getResumePdfStatusController:asyncHandler(getResumePdfStatusController),
+    getResumePdfFileController:asyncHandler(getResumePdfFileController)
 };
