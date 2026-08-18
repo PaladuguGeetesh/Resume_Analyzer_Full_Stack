@@ -27,7 +27,7 @@ Upload a resume, a job description, and a self-description (as text or PDF), and
 |---|---|
 | **IDOR fixed, permanently regression-tested** | A self-audit found report/job/PDF lookups that weren't scoped to the requesting user. Fixed by scoping every lookup to `{ _id, user: req.user.id }` and returning an identical `404` for "doesn't exist" and "not yours." Locked in by a dedicated suite (`interview.idor.test.js` + IDOR cases in `resumePdf.test.js`) so it can't silently regress. |
 | **Two independent BullMQ queues/workers** | Report generation and resume-PDF generation each get their own queue, worker, and dedicated Redis connection — the API responds `202` immediately instead of holding the request open for a 30–60s AI call, and traffic on one queue can't starve the other. |
-| **One circuit breaker shared across both AI call sites** | `opossum` binds one breaker instance to a single dispatcher function (`callPrimaryProvider({ type, params })`), so a sustained outage detected via report generation immediately fast-fails resume-PDF generation too, not just the feature that noticed it. Providers (Gemini / Groq) are swappable behind one env var, `AI_PRIMARY_PROVIDER`. |
+| **One circuit breaker shared across both AI call sites** | Protects against a sustained AI provider outage causing every in-flight request to hang or retry uselessly against a provider that's already down. `opossum` binds one breaker instance to a single dispatcher function (`callPrimaryProvider({ type, params })`), so a sustained outage detected via report generation immediately fast-fails resume-PDF generation too, not just the feature that noticed it. Once tripped, calls fail over from the primary provider to the secondary — `AI_PRIMARY_PROVIDER` picks which of Gemini / Groq is primary. |
 | **Idempotency keys, scoped per endpoint** | Both job-submission endpoints require an `Idempotency-Key` header, claimed atomically in Redis via `SET ... EX ... NX` (not check-then-set, which has a real race under concurrent retries). Report and resume-PDF submissions use distinct key prefixes so the same raw key value can't collide across the two. |
 | **Redis-backed JWT revocation** | Logout blacklists the token (`blacklist:<token>`, TTL'd to the token's own remaining lifetime), so a logged-out cookie is rejected server-side immediately — not just cleared client-side while remaining valid until natural expiry. |
 | **28-test automated suite** | Jest + Supertest + mongodb-memory-server + ioredis-mock on the backend (28 tests / 5 suites), Vitest + React Testing Library on the frontend — including dedicated IDOR and circuit-breaker regression suites. |
@@ -48,9 +48,24 @@ Upload a resume, a job description, and a self-description (as text or PDF), and
 
 ## Architecture
 
-![Architecture diagram](docs/architecture-diagram.png)
+![Architecture diagram](docs/architecture-diagram.svg)
 
 The client (React, on Vercel) calls an Express API (on Render) over REST/JSON, authenticated via an httpOnly JWT cookie. The API reads/writes MongoDB Atlas directly and uses Redis for auth (blacklist) and idempotency, but never does AI or PDF work inline — it enqueues onto one of two independent BullMQ queues and returns immediately. Each queue's worker calls its AI provider through the same shared circuit breaker (Gemini primary, Groq fallback); the Report Worker writes the result straight to MongoDB, while the Resume-PDF Worker additionally renders the AI's HTML to a PDF via Puppeteer before saving it (with a TTL) to MongoDB.
+
+### Circuit Breaker
+
+Both AI call sites (report generation and resume-PDF generation) go through one shared `opossum` circuit breaker instance, not two separate ones — a real dispatcher function (`callPrimaryProvider({ type, params })`) is the single action the breaker wraps, so its open/closed state is genuinely shared. This protects against a sustained AI provider outage: without it, every in-flight and new request would keep hanging on ~60s calls (and BullMQ retrying them) against a provider that's already down. Once the breaker trips, calls fail over from the primary provider to the secondary one — `AI_PRIMARY_PROVIDER` (`"gemini"` or `"groq"`) picks which is primary; the other is the fallback.
+
+Current defaults (`Backend/src/services/ai.service.js`, each overridable via its own env var for tests):
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `timeout` | 75s | Ceiling for a single provider call before it counts as a failure |
+| `volumeThreshold` | 3 | Minimum calls in the window before the failure rate is trusted |
+| `errorThresholdPercentage` | 50% | Failure rate that trips the breaker open |
+| `resetTimeout` | 3 min | How long the breaker stays open before allowing one test call (half-open) |
+| `rollingCountTimeout` | 7.5 min | Width of the rolling window used to compute the failure rate |
+| `rollingCountBuckets` | 5 | Number of buckets the rolling window is split into |
 
 Full request-lifecycle walkthroughs and the reasoning behind each decision: **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
 
@@ -74,6 +89,36 @@ Full request-lifecycle walkthroughs and the reasoning behind each decision: **[A
 5. On success: PDF stored in MongoDB (base64, 2-hour TTL), job marked `completed`, the poll response includes the PDF ID (`result.pdfId`)
 6. Frontend auto-fetches `GET /api/v1/interview/resume-pdf/:id` as a blob as soon as the poll reports `completed`, and triggers a browser download automatically — no click required
 7. If the PDF is never fetched within the 2-hour TTL window, a later fetch attempt returns a clean `404` ("This download has expired — please generate a new one.")
+
+## API Overview
+
+Every route currently defined in `Backend/src/routes/`. Full request/response shapes, headers, and error codes: **[API.md](./API.md)**.
+
+**Auth** (`/api/v1/auth`)
+
+| Method | Path | Description | Auth |
+|---|---|---|---|
+| POST | `/register` | Register a new user | No |
+| POST | `/login` | Log in, sets the JWT cookie | No |
+| GET | `/logout` | Log out, blacklists the current token | No |
+| GET | `/get-me` | Get the current user's details | Yes |
+
+**Interview Reports** (`/api/v1/interview`)
+
+| Method | Path | Description | Auth |
+|---|---|---|---|
+| POST | `/` | Enqueue interview-report generation (`Idempotency-Key` required) | Yes |
+| GET | `/status/:jobId` | Poll a report-generation job's status | Yes |
+| GET | `/report/:interviewId` | Fetch a completed interview report | Yes |
+| GET | `/` | List all of the current user's interview reports | Yes |
+
+**Resume PDF** (`/api/v1/interview/resume-pdf`)
+
+| Method | Path | Description | Auth |
+|---|---|---|---|
+| POST | `/:reportId` | Enqueue tailored resume-PDF generation (`Idempotency-Key` required) | Yes |
+| GET | `/status/:jobId` | Poll a resume-PDF job's status | Yes |
+| GET | `/:id` | Download the generated PDF | Yes |
 
 ## Getting Started (Local Development)
 
@@ -143,7 +188,7 @@ cd Backend && npm run worker:resumes
 cd frontend && npm run dev
 ```
 
-Three separate backend processes locally, on purpose — fault isolation and independent scaling, so a stuck PDF render can't block report generation or the API itself. Full reasoning in [ARCHITECTURE.md](./ARCHITECTURE.md). In the deployed environment they're combined into a single process via env flags for free-tier cost reasons — see [Known Limitations](#known-limitations).
+Three separate backend processes locally, on purpose — fault isolation and independent scaling, so a stuck PDF render can't block report generation or the API itself. Full reasoning, including why the deployed environment combines them into a single process via env flags instead: [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Running the Full Stack in Docker
 
@@ -174,9 +219,3 @@ cd frontend && npm test   # Vitest — 4 tests / 1 suite
 
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — system diagram, request-lifecycle walkthroughs, and the reasoning behind the major design decisions.
 - **[API.md](./API.md)** — every REST endpoint, grouped by resource, with auth requirements, headers, request/response shapes, and error codes.
-
-## Known Limitations
-
-- Worker processes run combined with the API in the current free-tier deployment (env-flag-gated), not as separate services.
-- Cross-domain cookie auth may be blocked by strict browser third-party cookie policies, depending on the browser and its settings.
-- Render's managed Redis free tier doesn't expose the `noeviction` policy BullMQ recommends for queue/lock data.
