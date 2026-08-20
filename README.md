@@ -50,7 +50,7 @@ Upload a resume, a job description, and a self-description (as text or PDF), and
 
 ![Architecture diagram](docs/architecture-diagram.svg)
 
-The client (React, on Vercel) calls an Express API (on Render) over REST/JSON, authenticated via an httpOnly JWT cookie. The API reads/writes MongoDB Atlas directly and uses Redis for auth (blacklist) and idempotency, but never does AI or PDF work inline — it enqueues onto one of two independent BullMQ queues and returns immediately. Each queue's worker calls its AI provider through the same shared circuit breaker (Gemini primary, Groq fallback); the Report Worker writes the result straight to MongoDB, while the Resume-PDF Worker additionally renders the AI's HTML to a PDF via Puppeteer before saving it (with a TTL) to MongoDB.
+The client (React, on Vercel) calls an Express API (on Render) over REST/JSON, authenticated via an httpOnly JWT cookie. The API reads/writes MongoDB Atlas directly and uses Redis for auth (blacklist) and idempotency, but never does AI or PDF work inline — it enqueues onto one of two independent BullMQ queues and returns immediately. Each queue's worker calls its AI provider through the same shared circuit breaker (Gemini primary, Groq ); the Report Worker writes the result straight to MongoDB, while the Resume-PDF Worker additionally renders the AI's HTML to a PDF via Puppeteer before saving it (with a TTL) to MongoDB.
 
 ### Circuit Breaker
 
